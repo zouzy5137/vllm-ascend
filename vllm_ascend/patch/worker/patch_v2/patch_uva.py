@@ -124,32 +124,40 @@ class MonitoredTorchTensor:
 class UvaBufferWrapper:
     """
     Ascend NPU doesn't support UVA tensors directly.
-    This is a wrapper class that provides CPU and NPU views of a UVA tensor.
-    However if users add environment parameter below, UVA feature is Supported.
-    os.environ['PYTORCH_NPU_ALLOC_CONF'] = 'pinned_mem_register:True'
+
+    Unlike GPU where ``get_accelerator_view_from_cpu_tensor`` creates a real
+    device-side view of pinned CPU memory (shared address space, no copy
+    needed), NPU does not support ``get_accelerator_view_from_cpu_tensor``.
+    Therefore we always allocate a separate NPU tensor and explicitly copy
+    dirty rows on access.  The ``is_uva_available()`` flag (controlled by
+    ``PYTORCH_NPU_ALLOC_CONF=pinned_mem_register:True``) still helps because
+    the source CPU tensor is pinned, enabling efficient ``non_blocking`` DMA.
     """
 
     def __init__(self, size: int | Sequence[int], dtype: torch.dtype):
         self._cpu: torch.Tensor = torch.zeros(size, dtype=dtype, device="cpu", pin_memory=True)
         self._np: np.ndarray = self._cpu.numpy()
         self._modified_indices: set[int] = set()
-        self._uva: torch.Tensor = self._cpu if is_uva_available() else torch.zeros_like(self._cpu, device="npu")
+        # Always allocate a separate NPU tensor.  Aliasing self._cpu here
+        # (as the old UVA-available shortcut did) yields a CPU tensor that
+        # breaks triton-ascend kernels which expect NPU device pointers.
+        self._uva: torch.Tensor = torch.zeros_like(self._cpu, device="npu")
 
     def _mark_cpu_modified(self, key: int):
         self._modified_indices.add(key)
 
     @property
     def cpu(self):
-        return self._cpu if is_uva_available() else MonitoredTorchTensor(self._cpu, self._mark_cpu_modified)
+        return MonitoredTorchTensor(self._cpu, self._mark_cpu_modified)
 
     @property
     def np(self):
-        return self._np if is_uva_available() else MonitoredNumPyArray(self._np, self._mark_cpu_modified)
+        return MonitoredNumPyArray(self._np, self._mark_cpu_modified)
 
     @property
     def uva(self):
         """Get the device data of the buffer."""
-        if not is_uva_available() and self._modified_indices:
+        if self._modified_indices:
             dirty_rows = sorted(self._modified_indices)
             n_dirty = len(dirty_rows)
             if dirty_rows[0] == 0 and dirty_rows[-1] == n_dirty - 1:
