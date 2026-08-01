@@ -252,8 +252,6 @@ class NPUModelRunner(GPUModelRunner):
                 num_reqs_padded,
                 num_reqs,
                 query_start_loc_np,
-                batch_desc.cg_mode,
-                batch_desc.num_reqs,
             )
 
         async_copy_to_gpu(query_start_loc_np, out=self.input_buffers.query_start_loc)
@@ -453,20 +451,17 @@ class NPUModelRunner(GPUModelRunner):
         num_reqs_padded: int,
         num_reqs: int,
         query_start_loc_np: np.ndarray,
-        cudagraph_runtime_mode: CUDAGraphMode | None = None,
-        batch_desc_num_reqs: int | None = None,
     ) -> tuple[np.ndarray, int]:
         """
         This function is only designed to satisfied the constraint that when the layout is TND,
         the first dimension of `hidden_states` must equal the last element of `actual_seq_lengths_q`.
-        """
-        # TODO: need refactor later, related to vllm PR #34043 this pr delete func
-        # relax_for_mixed_batch_cudagraphs, num_reqs no longer equals the actual number of requests.
-        if cudagraph_runtime_mode == CUDAGraphMode.FULL:
-            num_reqs_padded = num_reqs
-        else:
-            num_reqs_padded = batch_desc_num_reqs if batch_desc_num_reqs is not None else num_reqs
 
+        `num_reqs_padded` must be the padded request count that matches the captured graph
+        shape (i.e. `batch_desc.num_reqs`). After vLLM PR #34043 removed
+        `relax_for_mixed_batch_cudagraphs`, FULL-mode dispatch keys retain the real
+        `num_reqs`, so callers can rely on `batch_desc.num_reqs` directly instead of
+        falling back to the runtime `num_reqs`.
+        """
         if num_tokens_padded == num_reqs_padded * self.decode_query_len:
             # Uniform-batch case: num_reqs must be no greater than num_reqs_padded
             assert num_reqs <= num_reqs_padded
