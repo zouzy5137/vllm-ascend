@@ -1,0 +1,14 @@
+vllm_ascend/envs.py
+  h_1b05b5b5cd3301 79-83
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "05b32f465269f86782d950f2ecbe486c09e3bdba",
+  "prompts": {},
+  "humans": {
+    "h_1b05b5b5cd3301": {
+      "author": "zouzy <zouzongyu@huawei.com>"
+    }
+  }
+}
